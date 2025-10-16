@@ -172,8 +172,12 @@ def readAllFieldsWithYT(fields,loadPath,Res,
         print("Loading "+ loadPath)
         print("Chunk dimensions = ", pencil_shape)
 
-
-    ad = ds.covering_grid(level=0, left_edge=start_pos, dims=FFTHelperFuncs.local_shape)
+    try:
+        # Old interface (some older yt / AthenaPP versions)
+        ad = ds.h.covering_grid(level=0, left_edge=start_pos, dims=FFTHelperFuncs.local_shape)
+    except AttributeError:
+        # New interface (current yt / ParthenonDataset)
+        ad = ds.covering_grid(level=0, left_edge=start_pos, dims=FFTHelperFuncs.local_shape)
 
     if rhoField is not None:
         fields['rho'] = ad[rhoField].d
