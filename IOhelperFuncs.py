@@ -67,8 +67,34 @@ def read_fields(args):
             readAllFieldsWithYT(fields,'./Turb.acc.' + args['data_path'], args['res'],
                                 None, None, None,
                                 accFields, None)
+            
+    elif args['data_type'][:8] == 'AthenaPK':
+        rhoField = ('parthenon', 'prim_density')
+        velFields = [('parthenon', 'prim_velocity_1'), ('parthenon', 'prim_velocity_2'), ('parthenon', 'prim_velocity_3')]
+        if args['b']:
+            magFields = [('parthenon', 'prim_magnetic_field_1'), ('parthenon', 'prim_magnetic_field_2'), ('parthenon', 'prim_magnetic_field_3')]
+        if args['forced']:
+            accFields = [('parthenon', 'acc_0'),
+                         ('parthenon', 'acc_1'),
+                         ('parthenon', 'acc_2')]
 
+        if args['eos'] == 'adiabatic':
+            pressField = ('parthenon', 'prim_pressure')
 
+        if 'HDF' in args['data_type']:
+            readAllFieldsWithHDF(fields,args['data_path'], args['res'],
+                                rhoField, velFields, magFields,
+                                None, pressField,'F',use_athena_hdf=True)
+            readAllFieldsWithHDF(fields,args['data_path'], args['res'],
+                                None, None, None,
+                                accFields, None,'F',use_athena_hdf=True)
+        else:
+            readAllFieldsWithYT(fields,args['data_path'], args['res'],
+                                rhoField, velFields, magFields,
+                                None, pressField)
+            readAllFieldsWithYT(fields,args['data_path'], args['res'],
+                                None, None, None,
+                                accFields, None)
 
     elif args['data_type'] == 'AthenaHDFC':
         rhoField = 'density'
@@ -138,14 +164,16 @@ def readAllFieldsWithYT(fields,loadPath,Res,
     gid_y_s = rank % n_proc[1] * pencil_shape[1] # global y start index
 
     start_pos = left_edge
+    start_pos = start_pos.copy()
     start_pos[0] += gid_x_s / Res * (right_edge[0] - left_edge[0])
+
     start_pos[1] += gid_y_s / Res * (right_edge[1] - left_edge[1])
     if rank == 0:
         print("Loading "+ loadPath)
         print("Chunk dimensions = ", pencil_shape)
 
 
-    ad = ds.h.covering_grid(level=0, left_edge=start_pos,dims=FFTHelperFuncs.local_shape)
+    ad = ds.covering_grid(level=0, left_edge=start_pos, dims=FFTHelperFuncs.local_shape)
 
     if rhoField is not None:
         fields['rho'] = ad[rhoField].d
