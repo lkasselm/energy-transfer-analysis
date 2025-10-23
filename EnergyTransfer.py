@@ -7,20 +7,24 @@ import pickle
 import sys
 
 class EnergyTransfer:
-
     
-    def __init__(self, MPI, RES, fields, gamma):
+    
+    def __init__(self, MPI, RES, fields, gamma, box_length):
         
         self.gamma = gamma
         self.MPI = MPI
         self.comm = MPI.COMM_WORLD
         self.RES = RES
 
-        self.rho = fields['rho']
-        self.U = fields['U']
-        self.B = fields['B']
+        # Load fields and convert to units where the box has a linear size of 1. 
+        L = box_length 
+        self.rho = fields['rho'] * L**3
+        self.U = fields['U'] / L 
+        self.B = fields['B'] / L
         self.Acc = fields['Acc']
-        self.P = fields['P']
+        if self.Acc is not None:
+            self.Acc /= L  
+        self.P = fields['P'] * L 
 
         # Variables that we might (or might not) use later depending on the different definitons of terms
         self.W = None

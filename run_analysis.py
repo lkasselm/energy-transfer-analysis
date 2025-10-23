@@ -25,6 +25,11 @@ parser.add_argument('--res',
                     type=int,
                     help='set linear resolution of cubic box')
 
+parser.add_argument('--box_length',
+                    required=True,
+                    type=float,
+                    help='Set linear box size')
+
 parser.add_argument('--type',
                     required=True,
                     type=str,
@@ -121,8 +126,12 @@ comm  = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 
+if rank == 0:
+    print(f"Total MPI processes: {size}")
+
 # Parse energy transfer arguments
 resolution = args['res']
+box_length = args['box_length']
 if args['type'] == 'transfer':
     magnetic_terms = ['BB', 'BUT', 'BUP', 'UBT', 'UBPb']
     terms_to_analyze = args['terms']
@@ -199,7 +208,7 @@ fields = read_fields(args)
 # Run energy transfer analysis
 if args['type'] == 'transfer':
     
-    ET = EnergyTransfer(MPI,resolution,fields,gamma)
+    ET = EnergyTransfer(MPI,resolution,fields,gamma,box_length)
 
     if rank == 0:
         if os.path.isfile(outfile):

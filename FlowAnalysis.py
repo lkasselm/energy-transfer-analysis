@@ -33,11 +33,15 @@ class FlowAnalysis:
         else:
             self.global_min_max = {}
 
-        self.rho = fields['rho']
-        self.U = fields['U']
-        self.B = fields['B']
+        # Load fields and convert to units where the box has a linear size of 1. 
+        L = args['box_length']
+        self.rho = fields['rho'] * L**3
+        self.U = fields['U'] / L 
+        self.B = fields['B'] / L
         self.Acc = fields['Acc']
-        self.P = fields['P']
+        if self.Acc is not None:
+            self.Acc /= L  
+        self.P = fields['P'] * L 
         self.eos = args['eos']
         self.gamma = args['gamma']
         self.has_b_fields = args['b']
@@ -455,7 +459,7 @@ class FlowAnalysis:
             self.outfile.require_dataset(name + '/PowSpec/Bins', (1,len(self.k_bins)), dtype='f')[0] = self.k_bins
             self.outfile.require_dataset(name + '/PowSpec/Full', (4,len(self.k_bins)-1), dtype='f')[:,:] = PS_Full
 
-# e.g. (38) in https://arxiv.org/pdf/1101.0150.pdf
+    # e.g. (38) in https://arxiv.org/pdf/1101.0150.pdf
     def co_spectrum(self,name,fieldA,fieldB):
 
         FT_fieldA = newDistArray(self.FFT)
