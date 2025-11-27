@@ -1,3 +1,5 @@
+import os
+os.environ["UCX_LOG_LEVEL"] = "ERROR" # Suppress UCX warnings
 import argparse
 from mpi4py import MPI
 import FFTHelperFuncs
@@ -89,7 +91,7 @@ parser.add_argument('--terms',
                     nargs='+',
                     default=None,
                     choices = ['All', 'Int', 'UU', 'BUT', 'BUP', 'UBT', 'UBPb',
-                               'BB', 'BUPbb', 'UBPbb', 'SS', 'SU', 'US', 'PU', 'FU'],
+                               'BB', 'BUPbb', 'UBPbb', 'SS', 'SU', 'US', 'PU', 'FU', 'H', 'T'],
                     help='set energy transfer terms to analyze')
 
 parser.add_argument('--binning',
@@ -133,7 +135,7 @@ if rank == 0:
 resolution = args['res']
 box_length = args['box_length']
 if args['type'] == 'transfer':
-    magnetic_terms = ['BB', 'BUT', 'BUP', 'UBT', 'UBPb']
+    magnetic_terms = ['BB', 'BUT', 'BUP', 'UBT', 'UBPb'] # Why doesn't this include BUPbb and UBPbb?
     terms_to_analyze = args['terms']
 
     if 'All' in terms_to_analyze:
@@ -190,7 +192,7 @@ outfile = args['outfile']
 if args['eos'] == 'adiabatic':
     gamma = args['gamma']
 else:
-    gamma = None
+    gamma = None # This is problematic because gamma is assumed to be float in transfer analysis. Fix me.
 
 # Setup FFTs. Using real->complex transforms for performance in the transfer
 # analysis and because all quantities are also transformed back.
@@ -205,9 +207,11 @@ else:
 # Load data to data dictionary
 fields = read_fields(args)
 
+if rank == 0:
+    print("Data read complete.")
+
 # Run energy transfer analysis
 if args['type'] == 'transfer':
-    
     ET = EnergyTransfer(MPI,resolution,fields,gamma,box_length)
 
     if rank == 0:

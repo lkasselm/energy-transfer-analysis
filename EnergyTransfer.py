@@ -17,14 +17,12 @@ class EnergyTransfer:
         self.RES = RES
 
         # Load fields and convert to units where the box has a linear size of 1. 
-        L = box_length 
-        self.rho = fields['rho'] * L**3
-        self.U = fields['U'] / L 
-        self.B = fields['B'] / L
+        self.L = box_length 
+        self.rho = fields['rho'] 
+        self.U = fields['U'] 
+        self.B = fields['B'] 
         self.Acc = fields['Acc']
-        if self.Acc is not None:
-            self.Acc /= L  
-        self.P = fields['P'] * L 
+        self.P = fields['P']  
 
         # Variables that we might (or might not) use later depending on the different definitons of terms
         self.W = None
@@ -39,7 +37,16 @@ class EnergyTransfer:
 
         self.FFT = FFTHelperFuncs.FFT
         self.localKmag = np.linalg.norm(FFTHelperFuncs.local_wavenumbermesh,axis=0)
-
+        self.localK = FFTHelperFuncs.local_wavenumbermesh 
+    
+    def convert_to_physical_units(self, transfer_term):
+        """ convert transfer term to physical units 
+        
+            (The code assumes a box size of 1 for the gradient definition and for the integral
+            it just sums over all grid points. To get the physical units, multiply integral by 
+            cell volume L^3 / RES^3 and gradients by 1/L. --> overall factor L^2 / RES^3)
+        """
+        return transfer_term * self.L**2 / (self.RES**3)
 
     def getShellX(self,FTquant,Low,Up):
         """ extracts shell X-0.5 < K <X+0.5 of FTquant """
@@ -56,6 +63,24 @@ class EnergyTransfer:
 
         return Quant_X
     
+    def Helicity_decomp(self, FTquant):
+        """ perform helicity decomposition of vector field FTquant """
+
+        if FTquant.shape[0] != 3:
+            raise SystemExit("Helicity decomposition only implemented for vector fields")
+    
+        # construct helical basis:
+        kx = self.localK[0]
+        ky = self.localK[1]
+        kz = self.localK[2]
+        k_mag = self.localKmag
+        
+        # find vector orthogonal to k
+        
+
+
+        
+
     
     def populateResultDict(self,Result,KBins,formalism,Terms,method):
         if self.comm.Get_rank() != 0:
@@ -79,6 +104,9 @@ class EnergyTransfer:
                     Result[formalism][term][method][KBin] = {}              
 
     def addResultToDict(self,Result,formalism,term,method,KBin,QBin,value):
+
+        value = self.convert_to_physical_units(value)
+
         if self.comm.Get_rank() != 0:
             return
             
@@ -286,12 +314,12 @@ class EnergyTransfer:
                         DivU = MPIdivX(self.comm,U)
                     
                     
-                    localSum = - np.sum(B_K * UdotGradB_Q)              
+                    localSum = - np.sum(B_K * UdotGradB_Q) # Advective              
 
                     totalSumA = None
                     totalSumA = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
                     
-                    localSum = - np.sum(0.5 * B_K * B_Q * DivU)                    
+                    localSum = - np.sum(0.5 * B_K * B_Q * DivU) # Compressive                    
 
                     totalSumB = None
                     totalSumB = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)                    
@@ -311,7 +339,7 @@ class EnergyTransfer:
                         B_Q = self.getShellX(FT_B,QBins[q],QBins[q+1])
                     
                     if b is None:
-                        b = B/np.sqrt(rho)
+                        b = B/np.sqrt(rho) # Alfven velocity
                         
                     if bDotGradB_Q is None:
                         bDotGradB_Q = MPIXdotGradY(self.comm,b,B_Q)                        
@@ -621,6 +649,56 @@ class EnergyTransfer:
                     if self.comm.Get_rank() == 0:
                         self.addResultToDict(Result,"WW","FU","AnyToAny",KBin,QBin,totalSum)
                         print("done with FU for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
+
+                # Helicity transfer: 
+                if "H" in Terms:
+                    # 2 * (B_k * (U x B_q)), e.g. doi:10.1017/jfm.2021.496 equation (4.1)
+
+                    if B_K is None:
+                        B_K = self.getShellX(FT_B,KBins[k],KBins[k+1])
+
+                    if B_Q is None:
+                        B_Q = self.getShellX(FT_B,QBins[q],QBins[q+1])
+
+                    localSum = 2. * np.sum(B_K * np.cross(U, B_Q, axis=0))
+                    totalSum = None
+                    totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+
+                    if self.comm.Get_rank() == 0:
+                        self.addResultToDict(Result,"WW","H","AnyToAny",KBin,QBin,totalSum)
+                        print("done with H for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
+
+                if "T" in Terms:
+                    # Total triadic coupeling leading to energy increase in specific I shell (here I = 10), I.e. T_{Ikq}
+
+                    B_I = self.getShellX(FT_B,KBins[7],KBins[8])
+                    if B_K is None:
+                        B_K = self.getShellX(FT_B,KBins[k],KBins[k+1])
+                    if W_Q is None:
+                        W_Q = self.getShellX(FT_W,QBins[q],QBins[q+1])
+                    if B_Q is None:
+                        B_Q = self.getShellX(FT_B,QBins[q],QBins[q+1])
+                    if W_K is None:
+                        W_K = self.getShellX(FT_W,KBins[k],KBins[k+1])
+                    
+                    # B_I dot (B_Q dot grad) W_K
+                    B_QdotGradB_I = MPIXdotGradY(self.comm,B_Q,W_K)
+                    localSum = np.sum(B_I * B_QdotGradB_I)
+                    totalSum = None
+                    totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+
+                    if self.comm.Get_rank() == 0:
+                        self.addResultToDict(Result,"WW","TUBT","AnyToAny",KBin,QBin,totalSum)
+                    
+                    # - B_I dot (W_K dot grad) B_Q
+                    W_KdotGradB_Q = MPIXdotGradY(self.comm,W_K,B_Q)
+                    localSum = - np.sum(B_I * W_KdotGradB_Q)
+                    totalSum = None
+                    totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+
+                    if self.comm.Get_rank() == 0:
+                        self.addResultToDict(Result,"WW","TBB","AnyToAny",KBin,QBin,totalSum)
+                        print("done with T for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
 
                 # clear K terms
                 W_K = None
