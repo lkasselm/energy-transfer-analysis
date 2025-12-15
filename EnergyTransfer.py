@@ -39,14 +39,17 @@ class EnergyTransfer:
         self.localKmag = np.linalg.norm(FFTHelperFuncs.local_wavenumbermesh,axis=0)
         self.localK = FFTHelperFuncs.local_wavenumbermesh 
     
-    def convert_to_physical_units(self, transfer_term):
+    def convert_to_physical_units(self, transfer_term, has_gradient=True):
         """ convert transfer term to physical units 
         
             (The code assumes a box size of 1 for the gradient definition and for the integral
             it just sums over all grid points. To get the physical units, multiply integral by 
             cell volume L^3 / RES^3 and gradients by 1/L. --> overall factor L^2 / RES^3)
         """
-        return transfer_term * self.L**2 / (self.RES**3)
+        if has_gradient:
+            return transfer_term * self.L**2 / (self.RES**3)
+        else:
+            return transfer_term * self.L**3 / (self.RES**3)
 
     def getShellX(self,FTquant,Low,Up):
         """ extracts shell X-0.5 < K <X+0.5 of FTquant """
@@ -63,8 +66,11 @@ class EnergyTransfer:
 
         return Quant_X
     
-    def Helicity_decomp(self, FTquant):
-        """ perform helicity decomposition of vector field FTquant """
+    def getHelicalDecomposition(self, FTquant):
+        """ perform helicity decomposition of vector field FTquant
+            returns positive and negative helicity components B_plus, B_minus,
+            such that FTquant = B_plus + B_minus.  
+        """
 
         if FTquant.shape[0] != 3:
             raise SystemExit("Helicity decomposition only implemented for vector fields")
@@ -73,14 +79,36 @@ class EnergyTransfer:
         kx = self.localK[0]
         ky = self.localK[1]
         kz = self.localK[2]
-        k_mag = self.localKmag
         
-        # find vector orthogonal to k
-        
+        # find vector orthogonal to k:
+        # compute perpendicular norm safely
+        kmag_perp = np.sqrt(kx**2 + ky**2)
+        kmag_perp_safe = np.where(kmag_perp==0, 1.0, kmag_perp)
 
+        # e1 in xy-plane
+        e1 = np.array([-ky/kmag_perp_safe, kx/kmag_perp_safe, np.zeros_like(kx)])
 
-        
+        # handle exact k along z
+        mask = (kmag_perp == 0)
+        e1[:, mask] = np.array([[1.0],[0.0],[0.0]])  # broadcasting works safely
 
+        # second unit vector e2 = k x e1:
+        e2 = np.cross(np.stack([kx, ky, kz], axis=0).T, e1.T).T
+
+        # normalize e2
+        e2_norm = np.sqrt(np.sum(e2*e2, axis=0))
+        e2_norm_safe = np.where(e2_norm==0, 1.0, e2_norm)
+        e2 = e2 / e2_norm_safe
+
+        # move to helical basis: 
+        h_plus  = (e1 + 1j*e2)/np.sqrt(2)
+        h_minus = (e1 - 1j*e2)/np.sqrt(2)
+
+        # decompose FTB into helical modes:
+        B_plus  = np.sum(np.conj(h_plus)  * FTquant, axis=0) * h_plus
+        B_minus = np.sum(np.conj(h_minus)* FTquant, axis=0) * h_minus
+
+        return B_plus, B_minus 
     
     def populateResultDict(self,Result,KBins,formalism,Terms,method):
         if self.comm.Get_rank() != 0:
@@ -103,9 +131,11 @@ class EnergyTransfer:
                 if KBin not in Result[formalism][term][method].keys():
                     Result[formalism][term][method][KBin] = {}              
 
-    def addResultToDict(self,Result,formalism,term,method,KBin,QBin,value):
+    def addResultToDict(self,Result,formalism,term,method,KBin,QBin,value, convert_units=True, has_gradient=True):
+        """ add value to Result dictionary under specified keys """
 
-        value = self.convert_to_physical_units(value)
+        if convert_units:
+            value = self.convert_to_physical_units(value, has_gradient=has_gradient)
 
         if self.comm.Get_rank() != 0:
             return
@@ -152,7 +182,10 @@ class EnergyTransfer:
         if self.FT_B is None and self.B is not None:
             self.FT_B = newDistArray(self.FFT,rank=1)
             for i in range(3):
-                self.FT_B[i] = self.FFT.forward(self.B[i], self.FT_B[i])    
+                self.FT_B[i] = self.FFT.forward(self.B[i], self.FT_B[i]) 
+
+            # also compute helical decomposition of B field in Fourier space (if needed)
+            self.FT_B_plus, self.FT_B_minus = self.getHelicalDecomposition(self.FT_B)
         
         if self.FT_P is None and self.P is not None:
             self.FT_P = newDistArray(self.FFT)
@@ -225,6 +258,11 @@ class EnergyTransfer:
         DivU = None
         b = None
         Divb = None
+
+        if self.comm.Get_rank() == 0:
+            B_k_arr = np.zeros_like(range(len(KBins)-1)) # used to store total B energy in each K bin for normalization
+            B_k_plus_arr = np.zeros_like(range(len(KBins)-1))
+            B_k_minus_arr = np.zeros_like(range(len(KBins)-1))
         
         for q in range(len(QBins)-1):
             QBin = "%.2f-%.2f" % (QBins[q],QBins[q+1])
@@ -652,6 +690,7 @@ class EnergyTransfer:
 
                 # Helicity transfer: 
                 if "H" in Terms:
+           
                     # 2 * (B_k * (U x B_q)), e.g. doi:10.1017/jfm.2021.496 equation (4.1)
 
                     if B_K is None:
@@ -665,8 +704,25 @@ class EnergyTransfer:
                     totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
 
                     if self.comm.Get_rank() == 0:
-                        self.addResultToDict(Result,"WW","H","AnyToAny",KBin,QBin,totalSum)
+                        self.addResultToDict(Result,"WW","H","AnyToAny",KBin,QBin,totalSum, has_gradient=False) # No gradient in this term => different scaling with box size
                         print("done with H for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
+
+                    # helicity-decomposed transfer terms: 
+                    B_K_plus = self.getShellX(self.FT_B_plus,KBins[k],KBins[k+1])
+                    B_K_minus = self.getShellX(self.FT_B_minus,KBins[k],KBins[k+1])
+                    B_Q_plus = self.getShellX(self.FT_B_plus,QBins[q],QBins[q+1])
+                    B_Q_minus = self.getShellX(self.FT_B_minus,QBins[q],QBins[q+1])
+
+                    for signK, B_K_helical in zip(['+','-'], [B_K_plus,B_K_minus]):
+                        for signQ, B_Q_helical in zip(['+','-'], [B_Q_plus,B_Q_minus]):
+
+                            localSum = 2. * np.sum(B_K_helical * np.cross(U, B_Q_helical, axis=0))
+                            totalSum = None
+                            totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+
+                            if self.comm.Get_rank() == 0:
+                                self.addResultToDict(Result,"WW","H%s%s" % (signK,signQ),"AnyToAny",KBin,QBin,totalSum, has_gradient=False)
+                                print("done with H%s%s for K = %s Q = %s after %.1f sec [total]" % (signK,signQ,KBin,QBin,time.time() - startTime ))
 
                 if "T" in Terms:
                     # Total triadic coupeling leading to energy increase in specific I shell (here I = 10), I.e. T_{Ikq}
@@ -700,6 +756,24 @@ class EnergyTransfer:
                         self.addResultToDict(Result,"WW","TBB","AnyToAny",KBin,QBin,totalSum)
                         print("done with T for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
 
+                if self.comm.Get_rank() == 0:
+                    # sum over B_K**2 to get total B energy in each K bin for normalization
+                    if "BB" in Terms:
+                        localSum = np.sum(B_K**2)
+                        totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+                        B_k_arr[k] += totalSum
+
+                    if "H" in Terms:
+                        # also store helical decomposed B energy
+                        B_K_plus = self.getShellX(self.FT_B_plus,KBins[k],KBins[k+1])
+                        B_K_minus = self.getShellX(self.FT_B_minus,KBins[k],KBins[k+1])
+                        localSum_plus = np.sum(B_K_plus**2)
+                        localSum_minus = np.sum(B_K_minus**2)
+                        totalSum_plus = self.comm.reduce(sendobj=localSum_plus, op=self.MPI.SUM, root=0)
+                        totalSum_minus = self.comm.reduce(sendobj=localSum_minus, op=self.MPI.SUM, root=0)
+                        B_k_plus_arr[k] += totalSum_plus
+                        B_k_minus_arr[k] += totalSum_minus
+
                 # clear K terms
                 W_K = None
                 S_K = None
@@ -729,9 +803,15 @@ class EnergyTransfer:
             BDivW_Qover2SqrtRho = None
             OneOverSqrtRhoGradP_Q = None
             SqrtRhoAcc_Q = None
-            
-            Str = ""
-            for Term in Terms:
-                Str += "-" + Term            
-            if self.comm.Get_rank() != 0 and False:
-                pickle.dump(Result,open("tmp%s.pkl" % Str,"wb")) 
+        
+        # --- end of k,q loop
+        
+        # write B_k_arr to Result for normalization purposes:
+        if self.comm.Get_rank() == 0:
+            if "BB" in Terms:
+                Result["WW"]["B_k_energy"] = B_k_arr.tolist() * self.L**3 / self.RES**3  # multiply by volume element to get physical units. 
+            if "H" in Terms:
+                Result["WW"]["B_k_energy_plus"] = B_k_plus_arr.tolist()
+                Result["WW"]["B_k_energy_minus"] = B_k_minus_arr.tolist()
+
+        # --- end of getTransferWWAnyToAny

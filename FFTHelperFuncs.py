@@ -23,7 +23,7 @@ FFT = None
 local_wavenumbermesh = None
 local_shape = None
 
-def setup_fft(res, dtype=np.complex128):
+def setup_fft(res, dtype=np.complex64):
     """ Setup shared FFT object and properties
         res - linear resolution
     """

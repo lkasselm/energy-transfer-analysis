@@ -127,7 +127,7 @@ class FlowAnalysis:
             self.outfile.require_dataset('Filtered_' + kernel + '_KinEnergy/PowSpec/Bins', (1,len(k_lm)-1), dtype='f')[0] = k_lm[1:]
             self.outfile.require_dataset('Filtered_' + kernel + '_KinEnergy/PowSpec/Full', (1,len(k_lm)-1), dtype='f')[0] = KinEnergy
             self.outfile.require_dataset('Filtered_' + kernel + '_KinEnergy/PowSpec/low_pass_energies', (1,len(k_lm)), dtype='f')[0] = epsilon
-
+    
     def run_analysis(self):
 
         rho = self.rho
@@ -140,8 +140,8 @@ class FlowAnalysis:
             print("Running flow analysis")
             self.outfile = h5py.File(self.outfile_path, "w")
 
-        """
         self.vector_power_spectrum('u',U)
+        """
         self.vector_power_spectrum('rhoU',np.sqrt(rho)*U)
         self.vector_power_spectrum('rhoThirdU',rho**(1./3.)*U)
 
@@ -532,7 +532,7 @@ class FlowAnalysis:
     def B_field_analysis(self):
         if self.rank == 0:
             print('Running B field analysis')
-        # Calculate magnetic power spectrum, (signed) helicity spectrum and helicity variance spectrum
+        # Calculate magnetic power spectrum, (signed) helicity spectrum, absolute helicity spectrum, helicity variance spectrum, helicity field slice, cross-helicity spectrum
         
         B_hat = self.compute_fft(self.B)
         
@@ -548,10 +548,6 @@ class FlowAnalysis:
         # Get helicity spectrum:
         helicity_hat = newDistArray(self.FFT, rank=0) # when reducing rank = 1 arrays, the resulting array needs to be specified as rank = 0
         helicity_hat[:] = np.real(np.sum(A_hat * np.conj(B_hat), axis=0)) # this gets passed real values, but newDistArray type is complex. self.normalized spectrum will raise a warning. Fix me.
-
-        # print global and local shape of helicity_hat
-        #print('Local shape helicity_hat = {}'.format(np.shape(helicity_hat)))
-        #print('Global shape helicity_hat = {}'.format(helicity_hat.global_shape))
 
         PS_Full = self.normalized_spectrum(self.localKmag.reshape(-1),helicity_hat.reshape(-1))
 
@@ -569,13 +565,13 @@ class FlowAnalysis:
             self.outfile.require_dataset(name + '/PowSpec/Bins', (1,len(self.k_bins)), dtype='f')[0] = self.k_bins
             self.outfile.require_dataset(name + '/PowSpec/Full', (4,len(self.k_bins)-1), dtype='f')[:,:] = PS_Full
 
+        # Compute total helicity, write to file
+        tot_helicity = np.real(self.comm.allreduce(np.sum(helicity_hat)))
+        if self.rank == 0:
+            self.outfile.require_dataset(name + '/TotFull', (1,), dtype='f')[0] = tot_helicity
+
         # delete unused variables
         del k, k2, helicity_hat, cross    
-
-        # Compute total helicity, write to file
-        #tot_helicity = np.real(self.comm.allreduce(np.sum(helicity_hat)))
-        #if self.rank == 0:
-        #    self.outfile.require_dataset(name + '/TotFull', (1,), dtype='f')[0] = tot_helicity
 
         # Transform vector potential to real space: 
         A = newDistArray(self.FFT, False, rank=1)
@@ -591,15 +587,10 @@ class FlowAnalysis:
         helicity = newDistArray(self.FFT, False, rank=0)
         helicity[:] = np.sum(A*B, axis=0)
 
-        #print('Local shape helicity = {}'.format(np.shape(helicity)))
-        #print('Global shape helicity = {}'.format(helicity.global_shape))
-
-        #print('Type helicity = {}'.format(type(helicity)))
-
         # write z = 0 slice of helicity field to file
-        #if self.rank == 0:
-        #    print('Writing helicity field to file')
-        #    helicity.write(self.helicity_outfile_path, 'helicity', 0, global_slice=[slice(None), slice(None), 0])
+        if self.rank == 0:
+            print('Writing helicity field to file')
+            helicity.write(self.helicity_outfile_path, 'helicity', 0, global_slice=[slice(None), slice(None), 0])
 
         # calculate power spectrum for helicity variance:
         self.scalar_power_spectrum('helicity_variance', helicity)
@@ -614,30 +605,6 @@ class FlowAnalysis:
             self.outfile.require_dataset(name + '/PowSpec/Bins', (1,len(self.k_bins)), dtype='f')[0] = self.k_bins
             self.outfile.require_dataset(name + '/PowSpec/Full', (4,len(self.k_bins)-1), dtype='f')[:,:] = PS_Full
 
-    def spectral_transfer_function(self, J, U, B, k2):
-        """
-        Calculate the spectral transfer function T_{kpq} = <J^k . (U^p x B^q)>, where J = curl B 
-        J, U, B are the Fourier transforms of the current density, velocity field and magnetic field respectively. 
-        The superscripts k, p, q denote filtering at wavenumbers k, p, q respectively.
-        """
-
-        # define binning: 
-        resolution_exp = np.log(self.res/8)/np.log(2) * 4 + 1
-        bins = np.concatenate((np.array([0.]), 4.* 2** ((np.arange(0,resolution_exp + 1) - 1.) /4.))) # same binning as in transfer analysis 
-        for i in range(len(bins)):
-            for p in range(len(bins)):
-                for q in range(len(bins)):
-                    # get all vectors in J which fall into bin i
-                    J_i = J[:, (self.localKmag >= bins[i]) & (self.localKmag < bins[i+1])]
-                    U_p = U[:, (self.localKmag >= bins[p]) & (self.localKmag < bins[p+1])]
-                    B_q = B[:, (self.localKmag >= bins[q]) & (self.localKmag < bins[q+1])]
-
-                    # compute cross product U^p x B^q
-                    UxB = np.cross(U_p, B_q, axis=0)
-                    # compute dot product J^k . (U^p x B^q)
-                    J_dot_UxB = np.sum(J_i * UxB, axis=0)
-                    # sum over all contributions to get T_{kpq} (i.e. average over spherical shell)
-                    T_kpq = np.sum(J_dot_UxB)
 
     def get_and_write_statistics_to_file(self,field,name,bounds=None):
         """
