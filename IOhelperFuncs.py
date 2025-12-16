@@ -39,7 +39,8 @@ def read_fields(args):
 
         readAllFieldsWithYT(fields, args['data_path'], args['res'],
                             rhoField, velFields, magFields,
-                            accFields, pressField)
+                            accFields, pressField, downsample_factor=args['downsample_factor'])
+        print("Reading data with downsample factor:", args['downsample_factor'])
 
     elif args['data_type'][:8] == 'AthenaPP':
         rhoField = ('athena_pp', 'rho')
@@ -144,72 +145,73 @@ def read_fields(args):
 
     return fields
 
-def readAllFieldsWithYT(fields,loadPath,Res,
-    rhoField,velFields,magFields,accFields,pressField=None):
+def readAllFieldsWithYT(fields, loadPath, Res, rhoField, velFields, magFields,
+                        accFields, pressField=None, downsample_factor=1):
     """
-    Reads all fields using the yt frontend. Data is read in parallel.
+    Reads all fields using yt in parallel and downsamples by integer factor.
+    """
 
-    """
     pencil_shape = FFTHelperFuncs.local_shape
-    if (np.array(FFTHelperFuncs.FFT.global_shape(), dtype=int) % pencil_shape != 0).any():
-        raise SystemExit(
-            'Data cannot be split evenly among processes. ' +
-            'Abort (for now) - fix me!')
+    n_proc = np.array(FFTHelperFuncs.FFT.global_shape(), dtype=int) // pencil_shape
 
     ds = yt.load(loadPath)
     left_edge = ds.domain_left_edge
     right_edge = ds.domain_right_edge
 
-    n_proc = np.array(FFTHelperFuncs.FFT.global_shape(), dtype=int) // pencil_shape
-    gid_x_s = rank // n_proc[1] * pencil_shape[0] # global x start index
-    gid_y_s = rank % n_proc[1] * pencil_shape[1] # global y start index
+    # compute local start positions for this rank
+    gid_x_s = rank // n_proc[1] * pencil_shape[0]
+    gid_y_s = rank % n_proc[1] * pencil_shape[1]
 
-    start_pos = left_edge
-    start_pos = start_pos.copy()
+    # adjust the start positions to world coordinates
+    start_pos = left_edge.copy()
     start_pos[0] += gid_x_s / Res * (right_edge[0] - left_edge[0])
-
     start_pos[1] += gid_y_s / Res * (right_edge[1] - left_edge[1])
-    if rank == 0:
-        print("Loading "+ loadPath)
-        print("Chunk dimensions = ", pencil_shape)
 
+    # coarsened dims
+    coarsened_shape = tuple(s // downsample_factor for s in FFTHelperFuncs.local_shape)
+
+    # load covering grid
     try:
-        # Old interface (some older yt / AthenaPP versions)
-        ad = ds.h.covering_grid(level=0, left_edge=start_pos, dims=FFTHelperFuncs.local_shape)
+        ad = ds.covering_grid(level=0, left_edge=start_pos, dims=coarsened_shape)
     except AttributeError:
-        # New interface (current yt / ParthenonDataset)
-        ad = ds.covering_grid(level=0, left_edge=start_pos, dims=FFTHelperFuncs.local_shape)
+        ad = ds.h.covering_grid(level=0, left_edge=start_pos, dims=coarsened_shape)
 
+    # helper to slice every downsample_factor-th cell
+    slice_idx = tuple(slice(None, None, downsample_factor) for _ in range(3))
+
+    # density
     if rhoField is not None:
-        fields['rho'] = ad[rhoField].d
+        fields['rho'] = ad[rhoField][slice_idx].d
 
+    # pressure
     if pressField is not None:
-        fields['P'] = ad[pressField].d
+        fields['P'] = ad[pressField][slice_idx].d
     else:
-        if rank == 0:
-            print("WARNING: assuming isothermal EOS with c_s = 1, i.e. P = rho")
         fields['P'] = fields['rho']
-    
+
+    # velocity
     if velFields is not None:
-        U = np.zeros((3,) + pencil_shape,dtype=np.float64)
-        U[0] = ad[velFields[0]].d
-        U[1] = ad[velFields[1]].d
-        U[2] = ad[velFields[2]].d
+        U = np.zeros((3,) + coarsened_shape, dtype=np.float64)
+        for i in range(3):
+            U[i] = ad[velFields[i]][slice_idx].d
         fields['U'] = U
 
+    # magnetic field
     if magFields is not None:
-        B = np.zeros((3,) + pencil_shape,dtype=np.float64)
-        B[0] = ad[magFields[0]].d
-        B[1] = ad[magFields[1]].d
-        B[2] = ad[magFields[2]].d
+        B = np.zeros((3,) + coarsened_shape, dtype=np.float64)
+        for i in range(3):
+            B[i] = ad[magFields[i]][slice_idx].d
         fields['B'] = B
 
+    # acceleration
     if accFields is not None:
-        Acc = np.zeros((3,) + pencil_shape,dtype=np.float64)
-        Acc[0] = ad[accFields[0]].d
-        Acc[1] = ad[accFields[1]].d
-        Acc[2] = ad[accFields[2]].d
+        Acc = np.zeros((3,) + coarsened_shape, dtype=np.float64)
+        for i in range(3):
+            Acc[i] = ad[accFields[i]][slice_idx].d
         fields['Acc'] = Acc
+
+    return fields
+
 
 
 def readOneFieldWithHDF(loadPath,FieldName,Res,order):

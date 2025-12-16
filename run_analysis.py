@@ -27,6 +27,11 @@ parser.add_argument('--res',
                     type=int,
                     help='set linear resolution of cubic box')
 
+parser.add_argument("--downsample_factor",
+                    type=int,
+                    default=1,
+                    help='set downsampling factor for data. Must be an integer greater than or equal to 1.')
+
 parser.add_argument('--box_length',
                     required=True,
                     type=float,
@@ -132,7 +137,7 @@ if rank == 0:
     print(f"Total MPI processes: {size}")
 
 # Parse energy transfer arguments
-resolution = args['res']
+resolution = args["res"] // args["downsample_factor"] # // is integer division
 box_length = args['box_length']
 if args['type'] == 'transfer':
     magnetic_terms = ['BB', 'BUT', 'BUP', 'UBT', 'UBPb'] # Why doesn't this include BUPbb and UBPbb?
@@ -200,17 +205,15 @@ else:
 # power in real and spectral space is identical without normalizing for
 # power in the complex conjugate modes.
 if args['type'] == 'transfer':
-    FFTHelperFuncs.setup_fft(args['res'], dtype=np.float64)
+    FFTHelperFuncs.setup_fft(resolution, dtype=np.float64)
 else:
-    FFTHelperFuncs.setup_fft(args['res'], dtype=np.complex128)
+    FFTHelperFuncs.setup_fft(resolution, dtype=np.complex128)
 
 # Load data to data dictionary
 fields = read_fields(args)
 
-if rank == 0:
-    print("Data read complete.")
+args["res"] = resolution
 
-# Run energy transfer analysis
 if args['type'] == 'transfer':
     ET = EnergyTransfer(MPI,resolution,fields,gamma,box_length)
 

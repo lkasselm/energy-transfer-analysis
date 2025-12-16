@@ -588,9 +588,9 @@ class FlowAnalysis:
         helicity[:] = np.sum(A*B, axis=0)
 
         # write z = 0 slice of helicity field to file
-        if self.rank == 0:
-            print('Writing helicity field to file')
-            helicity.write(self.helicity_outfile_path, 'helicity', 0, global_slice=[slice(None), slice(None), 0])
+        #if self.rank == 0:
+        #    print('Writing helicity field to file')
+        #    helicity.write(self.helicity_outfile_path, 'helicity', 0, global_slice=[slice(None), slice(None), 0])
 
         # calculate power spectrum for helicity variance:
         self.scalar_power_spectrum('helicity_variance', helicity)
