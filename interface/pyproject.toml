@@ -1,0 +1,5 @@
+[project]
+name = "python_tools"
+version = "0.1.0"
+description = "Utility classes for Parthenon/yt analysis"
+requires-python = ">=3.8"
