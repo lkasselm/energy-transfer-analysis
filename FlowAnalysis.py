@@ -10,6 +10,7 @@ from scipy.stats import binned_statistic
 from math import ceil
 from MPIderivHelperFuncs import MPIderiv2, MPIXdotGradY, MPIdivX, MPIdivXY, MPIgradX, MPIrotX
 from mpi4py_fft import PFFT, HDF5File, NCFile
+from DecompHelperFuncs import getHelicalDecomposition
 
 class FlowAnalysis:
     
@@ -529,17 +530,24 @@ class FlowAnalysis:
         FT_vec = self.compute_fft(vec)
         self.vector_power_spectrum_from_fft(name, FT_vec)
 
+    
+
     def B_field_analysis(self):
         if self.rank == 0:
             print('Running B field analysis')
+
+        k = np.array(self.localK) # create copy to avoid modifying self.localK
         # Calculate magnetic power spectrum, (signed) helicity spectrum, absolute helicity spectrum, helicity variance spectrum, helicity field slice, cross-helicity spectrum
         
         B_hat = self.compute_fft(self.B)
+        # perform helical decomposition on the B field: 
+        Bplus_hat, Bminus_hat = getHelicalDecomposition(B_hat, k[0], k[1], k[2])
         
         self.vector_power_spectrum_from_fft('B', B_hat)
+        self.vector_power_spectrum_from_fft('B_plus', Bplus_hat)
+        self.vector_power_spectrum_from_fft('B_minus', Bminus_hat)
 
         # Calculate Vector potential in fourier space:
-        k = np.array(self.localK) 
         cross = np.cross(k, B_hat, axis=0) 
         k2 = np.sum(k**2, axis=0) 
         k2[k2 == 0] = 1.0  # avoid division by zero for DC mode
