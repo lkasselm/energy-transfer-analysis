@@ -9,7 +9,6 @@ import sys
 
 class EnergyTransfer:
     
-    
     def __init__(self, MPI, RES, fields, gamma, box_length):
         
         self.gamma = gamma
@@ -215,11 +214,6 @@ class EnergyTransfer:
         DivU = None
         b = None
         Divb = None
-
-        if self.comm.Get_rank() == 0:
-            B_k_arr = np.zeros_like(range(len(KBins)-1)) # used to store total B energy in each K bin for normalization
-            B_k_plus_arr = np.zeros_like(range(len(KBins)-1))
-            B_k_minus_arr = np.zeros_like(range(len(KBins)-1))
         
         for q in range(len(QBins)-1):
             QBin = "%.2f-%.2f" % (QBins[q],QBins[q+1])
@@ -645,6 +639,9 @@ class EnergyTransfer:
                         self.addResultToDict(Result,"WW","FU","AnyToAny",KBin,QBin,totalSum)
                         print("done with FU for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
 
+                # Dissipation terms:
+                
+
                 # Helicity transfer: 
                 if "H" in Terms:
            
@@ -713,24 +710,6 @@ class EnergyTransfer:
                         self.addResultToDict(Result,"WW","TBB","AnyToAny",KBin,QBin,totalSum)
                         print("done with T for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
 
-                if self.comm.Get_rank() == 0:
-                    # sum over B_K**2 to get total B energy in each K bin for normalization
-                    if "BB" in Terms:
-                        localSum = np.sum(B_K**2)
-                        totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
-                        B_k_arr[k] += totalSum
-
-                    if "H" in Terms:
-                        # also store helical decomposed B energy
-                        B_K_plus = self.getShellX(self.FT_B_plus,KBins[k],KBins[k+1])
-                        B_K_minus = self.getShellX(self.FT_B_minus,KBins[k],KBins[k+1])
-                        localSum_plus = np.sum(B_K_plus**2)
-                        localSum_minus = np.sum(B_K_minus**2)
-                        totalSum_plus = self.comm.reduce(sendobj=localSum_plus, op=self.MPI.SUM, root=0)
-                        totalSum_minus = self.comm.reduce(sendobj=localSum_minus, op=self.MPI.SUM, root=0)
-                        B_k_plus_arr[k] += totalSum_plus
-                        B_k_minus_arr[k] += totalSum_minus
-
                 # clear K terms
                 W_K = None
                 S_K = None
@@ -762,13 +741,5 @@ class EnergyTransfer:
             SqrtRhoAcc_Q = None
         
         # --- end of k,q loop
-        
-        # write B_k_arr to Result for normalization purposes:
-        if self.comm.Get_rank() == 0:
-            if "BB" in Terms:
-                Result["WW"]["B_k_energy"] = B_k_arr.tolist() * self.L**3 / self.RES**3  # multiply by volume element to get physical units. 
-            if "H" in Terms:
-                Result["WW"]["B_k_energy_plus"] = B_k_plus_arr.tolist()
-                Result["WW"]["B_k_energy_minus"] = B_k_minus_arr.tolist()
 
         # --- end of getTransferWWAnyToAny

@@ -108,3 +108,49 @@ def dict_to_array(transfer_dict):
             array[i, j] = transfer_dict[k][Q]
 
     return array, k_labels, Q_labels
+
+def get_spectrum(filename, field, time=None, parent=None):
+    from energy_transfer_interface.analysis import Spectrum
+    # Extract Spectral content:
+    with h5py.File(filename, 'r') as f:
+        # List top-level groups/datasets
+        try:
+            d = f[field]['PowSpec']['Full'][:]
+        except:
+            # When desired spectrum type not found, list available spectra in the error message: 
+            avail_fields = []
+            for key in f.keys():
+                try: 
+                    d = f[key]['PowSpec']['Full'][:]
+                    avail_fields.append(key)
+                except:
+                    pass 
+            raise KeyError("No spectrum for field "+field+". Here are the available spectra: "+str(avail_fields))
+    spectrum = Spectrum(field, d[0], d[1], parent=parent, binscale='linear', time=time)
+    return spectrum
+
+def get_energy_transfer(filename, time=None, parent=None):
+    import pickle
+    from energy_transfer_interface.analysis import EnergyTransfer
+    with open(filename, "rb") as f:
+        data = pickle.load(f)
+    
+    types = ['BB', 'UU', 'UBTb']
+    transfer_data = {}
+
+    for type_ in types:
+
+        # Extract transfer array and bins:
+        try:
+            transfer_dict = data['WW'][type_]['AnyToAny']
+        except KeyError:
+            raise KeyError(f"Transfer type {type_} not found in transfer analysis data.")
+        transfer_array, k_labels, _ = dict_to_array(transfer_dict)
+        if type_ == 'UBTb':
+            type_ = 'UBT'  # rename for consistency
+        transfer_data[type_] = transfer_array            
+    k_edges = np.array([tuple(map(float, s.split('-'))) for s in k_labels])
+    k_geom = np.sqrt(k_edges[:, 0] * k_edges[:, 1])
+
+    energy_transfer = EnergyTransfer(transfer_data, k_geom, k_edges, parent=parent, time=time)
+    return energy_transfer

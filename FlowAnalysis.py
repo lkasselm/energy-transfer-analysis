@@ -541,24 +541,24 @@ class FlowAnalysis:
         
         B_hat = self.compute_fft(self.B)
         # perform helical decomposition on the B field: 
-        Bplus_hat, Bminus_hat = getHelicalDecomposition(B_hat, k[0], k[1], k[2])
+        # Bplus_hat, Bminus_hat = getHelicalDecomposition(B_hat, k[0], k[1], k[2])
         
         self.vector_power_spectrum_from_fft('B', B_hat)
-        self.vector_power_spectrum_from_fft('B_plus', Bplus_hat)
-        self.vector_power_spectrum_from_fft('B_minus', Bminus_hat)
+        # self.vector_power_spectrum_from_fft('B_plus', Bplus_hat)
+        # self.vector_power_spectrum_from_fft('B_minus', Bminus_hat)
 
         # Calculate Vector potential in fourier space:
-        cross = np.cross(k, B_hat, axis=0) 
-        k2 = np.sum(k**2, axis=0) 
-        k2[k2 == 0] = 1.0  # avoid division by zero for DC mode
-        A_hat = 1j * cross / k2
+        #cross = np.cross(k, B_hat, axis=0) 
+        #k2 = np.sum(k**2, axis=0) 
+        #k2[k2 == 0] = 1.0  # avoid division by zero for DC mode
+        #A_hat = 1j * cross / k2
 
         # Get helicity spectrum:
-        helicity_hat = newDistArray(self.FFT, rank=0) # when reducing rank = 1 arrays, the resulting array needs to be specified as rank = 0
-        helicity_hat[:] = np.real(np.sum(A_hat * np.conj(B_hat), axis=0)) # this gets passed real values, but newDistArray type is complex. self.normalized spectrum will raise a warning. Fix me.
+        #helicity_hat = newDistArray(self.FFT, rank=0) # when reducing rank = 1 arrays, the resulting array needs to be specified as rank = 0
+        #helicity_hat[:] = np.real(np.sum(A_hat * np.conj(B_hat), axis=0)) # this gets passed real values, but newDistArray type is complex. self.normalized spectrum will raise a warning. Fix me.
 
-        PS_Full = self.normalized_spectrum(self.localKmag.reshape(-1),helicity_hat.reshape(-1))
-
+        #PS_Full = self.normalized_spectrum(self.localKmag.reshape(-1),helicity_hat.reshape(-1))
+        """
         # Write helicity spectrum to file
         name = 'helicity'
         if self.rank == 0:
@@ -612,7 +612,7 @@ class FlowAnalysis:
         if self.rank == 0:
             self.outfile.require_dataset(name + '/PowSpec/Bins', (1,len(self.k_bins)), dtype='f')[0] = self.k_bins
             self.outfile.require_dataset(name + '/PowSpec/Full', (4,len(self.k_bins)-1), dtype='f')[:,:] = PS_Full
-
+        """
 
     def get_and_write_statistics_to_file(self,field,name,bounds=None):
         """

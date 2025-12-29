@@ -1,9 +1,7 @@
 # python tools for analyzing Parthenon simulation data
 
 # TODO: 
-# - implement EnergyTransfer class
 # - the internal time units should always be in initial Alfven times.
-# - Implement flexible plotting functions so I can easily compare different quantities across simulations
 
 import yt
 yt.funcs.mylog.setLevel("ERROR") # suppress yt warnings 
@@ -16,7 +14,7 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import pickle
-import python_tools.io_utils as io_utils
+import energy_transfer_interface.io_utils as io_utils
 
 # Map simple keys to parthenon keys
 prim_key_dict = {
@@ -52,7 +50,7 @@ class SimSnap: # wrapper for yt dataset with additional functionality
     def plot_slice(self, field, axis="z", center="l"):
         # Assuming uniform grid
         ds = self.ds
-        slc = yt.SlicePlot(ds, axis, prim_key_dict[field], center='l')  # plot a z = const slice of 'density'
+        slc = yt.SlicePlot(ds, axis, prim_key_dict[field], center='l') 
         slc.set_log(prim_key_dict[field], False)  # linear scale
         slc.show()  # opens an interactive plot
     
@@ -68,15 +66,12 @@ class Spectrum:
             self.time = 0.0
         else:
             self.time = time
-        # get nyquist wavenumber from parent simulation
-        self.k_ny = parent.k_ny
     
     def plot(self, label=None, color=None, linestyle='-', marker=None, type='values'):
         if label is None:
             label = f't={self.time}'
-        k_ny_idx = np.searchsorted(self.bins, self.k_ny)
         if type == 'values':
-            plt.loglog(self.bins[:k_ny_idx], self.values[:k_ny_idx], label=label, color=color, linestyle=linestyle, marker=marker)
+            plt.loglog(self.bins, self.values, label=label, color=color, linestyle=linestyle, marker=marker)
             plt.ylabel('Power')
         elif type == 'logslope':
             # compute local log-log slope of the spectrum
@@ -86,7 +81,7 @@ class Spectrum:
                 Pm1, Pp1 = self.values[i-1], self.values[i+1]
                 slope = (np.log(Pp1) - np.log(Pm1)) / (np.log(kp1) - np.log(km1))
                 slopes[i] = slope
-            plt.semilogx(self.bins[:k_ny_idx], slopes[:k_ny_idx], label=label, color=color, linestyle=linestyle, marker=marker)
+            plt.semilogx(self.bins, slopes, label=label, color=color, linestyle=linestyle, marker=marker)
             plt.ylabel('d log(P) / d log(k)')
         plt.xlabel('k')
         plt.title(f'Power Spectrum: {self.type}')
@@ -144,7 +139,7 @@ class EnergyTransfer:
         # can be one of: 'BB', 'UU', 'BUT', 'UBT'
         # transfer_array: 2D numpy array with shape (bins, bins), where element (i,j) indicates energy transfer from shell j to shell i
         # bins: 1D numpy array with geometric mean of bin edges
-        # parent_simulation: Simulation object that this transfer data belongs to
+        # parent: Simulation object that this transfer data belongs to
         self.bins = bins
         self.parent_simulation = parent_simulation
         self.bin_edges = bin_edges
@@ -170,9 +165,16 @@ class EnergyTransfer:
         self.bin_widths = self.bin_edges[:, 1] - self.bin_edges[:, 0]
         
         # Get corresponding spectrum object: 
-        self.Bspectrum = parent_simulation.get_power_spectrum(time, type_='B')
+        try: 
+            self.Bspectrum = self.parent_simulation.get_spectrum(time, field='B')
+        except Exception as e:
+            print(f"Warning: Could not get B spectrum for EnergyTransfer: {e}")
+            self.Bspectrum = None
         # get integral scale from spectrum
-        self.int_scale = self.Bspectrum.int_scale
+        if self.Bspectrum is not None:
+            self.int_scale = self.Bspectrum.int_scale
+        else:
+            self.int_scale = None
         
     def get(self, K, Q, channel):
         # retrieve transfer value for given K and Q via interpolation
@@ -430,7 +432,7 @@ class Simulation:
         data = io_utils.read_h5_to_dict(filename)
         return data
 
-    def get_power_spectrum(self, time, type_='B'):
+    def get_spectrum(self, time, field='B'):
         # retrieve flow analysis file that is closest to "time":
         if len(self.flow_analysis_files) == 0:
             raise RuntimeError("No flow analysis files found in simulation directory.")
@@ -442,22 +444,7 @@ class Simulation:
         step_exact = io_utils.extract_index(filename)
         time = step_exact * self.dt
         # Extract Spectral content:
-        with h5py.File(filename, 'r') as f:
-            # List top-level groups/datasets
-            try:
-                d = f[type_]['PowSpec']['Full'][:]
-            except:
-                # When desired spectrum type not found, list available spectra in the error message: 
-                avail_keys = []
-                for key in f.keys():
-                    try: 
-                        d = f[key]['PowSpec']['Full'][:]
-                        avail_keys.append(key)
-                    except:
-                        pass 
-                raise KeyError("No spectrum for type "+type_+". Here are the available spectra: "+str(avail_keys))
-        spectrum = Spectrum(type_, d[0], d[1], parent=self, binscale='linear', time=time)
-        return spectrum
+        return io_utils.get_spectrum(filename, field=field, time=time, parent=self)
     
     def get_energy_transfer(self, time):
         # Currently, this assumes that the fiels contain the transfer terms ''BB', 'UU' and 'UBTb'. 
