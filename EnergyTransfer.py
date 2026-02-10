@@ -1,7 +1,7 @@
 import numpy as np
 import FFTHelperFuncs
 from mpi4py_fft import newDistArray
-from MPIderivHelperFuncs import MPIderiv2, MPIXdotGradYScalar, MPIXdotGradY, MPIdivX, MPIdivXY, MPIgradX
+from MPIderivHelperFuncs import MPIderiv2, MPIXdotGradYScalar, MPIXdotGradY, MPIdivX, MPIdivXY, MPIgradX, MPIlaplX
 from DecompHelperFuncs import getHelicalDecomposition
 import time
 import pickle
@@ -709,6 +709,47 @@ class EnergyTransfer:
                     if self.comm.Get_rank() == 0:
                         self.addResultToDict(Result,"WW","TBB","AnyToAny",KBin,QBin,totalSum)
                         print("done with T for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
+
+                if "nuU" in Terms:
+                    # kinetic energy dissipation by viscosity
+                    # Note: Currently using W_k and U_k interchangeably here, as rho=1 in the test cases
+
+                    if W_K is None:
+                        W_K = self.getShellX(FT_W,KBins[k],KBins[k+1])
+
+                    if W_Q is None:
+                        W_Q = self.getShellX(FT_W,QBins[q],QBins[q+1])
+
+                    LapW_Q = MPIlaplX(self.comm,W_Q)
+
+                    localSum = self.nu * np.sum(W_K * LapW_Q)
+
+                    totalSum = None
+                    totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+
+                    if self.comm.Get_rank() == 0:
+                        self.addResultToDict(Result,"WW","nuU","AnyToAny",KBin,QBin,totalSum)
+                        print("done with nuU for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
+
+                if "etaB" in Terms:
+                    # magnetic energy dissipation by resistivity
+
+                    if B_K is None:
+                        B_K = self.getShellX(FT_B,KBins[k],KBins[k+1])
+
+                    if B_Q is None:
+                        B_Q = self.getShellX(FT_B,QBins[q],QBins[q+1])
+
+                    LapB_Q = MPIlaplX(self.comm,B_Q)
+
+                    localSum = self.eta * np.sum(B_K * LapB_Q)
+
+                    totalSum = None
+                    totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+
+                    if self.comm.Get_rank() == 0:
+                        self.addResultToDict(Result,"WW","etaB","AnyToAny",KBin,QBin,totalSum)
+                        print("done with etaB for K = %s Q = %s after %.1f sec [total]" % (KBin,QBin,time.time() - startTime ))
 
                 # clear K terms
                 W_K = None

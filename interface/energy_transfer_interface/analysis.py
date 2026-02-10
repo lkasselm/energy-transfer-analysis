@@ -45,14 +45,13 @@ class SimSnap: # wrapper for yt dataset with additional functionality
     def __init__(self, filename):
         self.filename = filename
         self.ds = yt.load(filename)
-        self.ad = self.ds.all_data()
     
     def plot_slice(self, field, axis="z", center="l"):
         # Assuming uniform grid
         ds = self.ds
         slc = yt.SlicePlot(ds, axis, prim_key_dict[field], center='l') 
         slc.set_log(prim_key_dict[field], False)  # linear scale
-        slc.show()  # opens an interactive plot
+        slc.show() 
     
 # Simple container for spectrum data
 class Spectrum:
@@ -236,9 +235,9 @@ class EnergyTransfer:
         total = np.sum(arr[K_idx, :])
         return total
 
-    def B_timescale(self, normalize=False):
+    def B_timescale(self, normalize=False, channel='all'):
         # For each magnetic mode K, compute the timescale tau_K = E_K / (dE_K/dt), where dE_K/dt is the total energy received by shell K from all Q shells
-        _, dEk_dt = self.get_tot_to_B('all')
+        _, dEk_dt = self.get_tot_to_B(channel)
         timescales = np.zeros_like(self.bins)
         for i, k in enumerate(self.bins):
             if k == 0.0:
@@ -397,6 +396,7 @@ class Simulation:
         df.columns = columns
         # Compute dlog(ME)/dlog(t)
         df['dlogME_dlogt'] = np.gradient(np.log(df['ME']), np.log(df['time']))
+        df["dlogKE_dlogt"] = np.gradient(np.log(df['KE']), np.log(df['time']))
         return df
     
     def v_rms(self, time):
