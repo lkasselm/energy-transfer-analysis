@@ -3,13 +3,15 @@ import pandas as pd
 import re 
 import numpy as np 
 from collections import defaultdict
+import os
 
 def extract_index(filename):
     """
-    Extract the numeric index from a filename where the index comes after 'prim' and ends with a dot.
-    Works for any extension.
+    Extract the numeric index from a filename where the index is the last number
+    before the file extension. Works for any extension.
     """
-    match = re.search(r'prim\.(\d+)\.', filename)
+    filename_only = os.path.basename(filename)  # remove directory
+    match = re.search(r'(\d+)\.[^.]+$', filename_only)
     if match:
         return int(match.group(1))
     else:
@@ -108,6 +110,31 @@ def dict_to_array(transfer_dict):
             array[i, j] = transfer_dict[k][Q]
 
     return array, k_labels, Q_labels
+
+def parse_spc_file(file_path):
+    """
+    Parses a whitespace-delimited file with columns:
+    Bin, En_sum, K_sum, Count
+    into a pandas DataFrame. Skips incomplete rows.
+    """
+    # Read the file, skipping empty lines
+    df = pd.read_csv(
+        file_path,
+        sep=r'\s+',          # matches any whitespace
+        comment='#',
+        names=['Bin','En_sum','K_sum','Count'],
+        skip_blank_lines=True
+)    
+    # Drop rows where any column is missing
+    df = df.dropna()
+    
+    # Convert columns to appropriate types
+    df['Bin'] = df['Bin'].astype(int)
+    df['En_sum'] = df['En_sum'].astype(float)
+    df['K_sum'] = df['K_sum'].astype(float)
+    df['Count'] = df['Count'].astype(int)
+    
+    return df
 
 def get_spectrum(filename, field, time=None, parent=None):
     from energy_transfer_interface.analysis import Spectrum
