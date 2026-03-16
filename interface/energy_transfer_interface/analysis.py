@@ -398,6 +398,10 @@ class Simulation:
         pattern = "flow_analysis_BB_parthenon.prim.*.hdf5"
         self.flow_analysis_files = sorted(glob.glob(os.path.join(directory, pattern)))
 
+        # Find all spectral .spc files: 
+        pattern = "*.[0-9][0-9][0-9][0-9][0-9].spc"
+        self.spectral_files = sorted(glob.glob(os.path.join(directory, pattern)))
+
         # Find all transfer analysis .pkl files:
         pattern = "transfer_analysis_parthenon.prim.*.pkl"
         self.transfer_analysis_files = sorted(glob.glob(os.path.join(directory, pattern)))
@@ -432,7 +436,10 @@ class Simulation:
         if len(hist_files) > 1:
             print(f"Warning: multiple history files found in directory {self.directory}, using {hist_files[0]}")
         hist_file = hist_files[0]
-        df = pd.read_csv(hist_file, delim_whitespace=True, comment='#')
+        try:
+            df = pd.read_csv(hist_file, delim_whitespace=True, comment='#')
+        except:
+            df = pd.read_csv(hist_file, sep=r"\s+", comment="#", engine="python")
         # Extract column names from the first commented line
         with open(hist_file) as f:
             for line in f:
@@ -477,6 +484,21 @@ class Simulation:
         filename = min(self.flow_analysis_files, key=lambda f: abs(io_utils.extract_index(f) - step))
         data = io_utils.read_h5_to_dict(filename)
         return data
+
+    def get_spectrum_(self, time):
+        # retrieve flow analysis file that is closest to "time":
+        if len(self.spectral_files) == 0:
+            raise RuntimeError("No spectral files found in simulation directory.")
+        step = round(time/self.dt)
+        if step < 0 or step >= len(self.spectral_files):
+            raise ValueError(f"Time {time} out of range (0 to {self.dt * len(self.spectral_files)})")
+        filename = min(self.spectral_files, key=lambda f: abs(io_utils.extract_index(f) - step))
+        # get the exact time from the snapshot index:
+        step_exact = io_utils.extract_index(filename)
+        time = step_exact * self.dt
+        
+        dataframe = io_utils.parse_spc_file(filename)
+        return Spectrum("B", dataframe["Bin"], dataframe["En_sum"], parent=self, binscale='linear', time=time)
 
     def get_spectrum(self, time, field='B'):
         # retrieve flow analysis file that is closest to "time":
