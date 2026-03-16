@@ -236,35 +236,81 @@ class EnergyTransfer:
         val = self.transfer_data[channel][K_idx, Q_idx]
         return val
     
-    def plot(self, channel, norm='linear', linthresh=100, linscale=1, show_integral_scale=True):
+    def plot(self, channel, norm='linear', linthresh=0.01, linscale=1,
+            show_integral_scale=True, ax=None, add_colorbar=True,
+            show_title=True, show_xlabel=True, show_ylabel=True,
+            show_xticks=True):
+
         arr = self.transfer_data[channel]
-        maxabs = np.max(np.abs(arr))
-        plt.figure(figsize=(8, 6))
-        if norm == 'symlog':
-            norm = SymLogNorm(linthresh=linthresh, linscale=linscale,
-                            vmin=-maxabs, vmax=maxabs)
+        arr = arr / np.max(np.abs(arr))
+
+        # Create figure only if no axis is provided
+        created_fig = False
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8, 6))
+            created_fig = True
         else:
-            # symmetric linear norm
-            norm = matplotlib.colors.Normalize(vmin=-maxabs, vmax=maxabs)
+            fig = ax.figure
+
+        # --- Normalization ---
+        if norm == 'symlog':
+            norm_obj = SymLogNorm(linthresh=linthresh, linscale=linscale,
+                                vmin=-1, vmax=1)
+        else:
+            norm_obj = matplotlib.colors.Normalize(vmin=-1, vmax=1)
+
+        # --- Integral scale lines ---
         if show_integral_scale:
             int_k = 1 / self.int_scale
-            int_k_idx = np.searchsorted(self.bins, int_k)
-            plt.axvline(int_k_idx, color='gray', linestyle='-', label='Integral Scale', alpha=0.3, linewidth=4)
-            plt.axhline(int_k_idx, color='gray', linestyle='-', alpha=0.3, linewidth=4)
-        im = plt.imshow(arr.T, origin='lower', cmap='RdBu_r', aspect='auto', norm=norm) # transposed such that rows = Q, cols = K
-        plt.colorbar(im, label='Energy Transfer')
+            ax.axvline(int_k, color='gray', linestyle='-',
+                    label='Integral Scale', alpha=0.3, linewidth=4)
+            ax.axhline(int_k, color='gray', linestyle='-',
+                    alpha=0.3, linewidth=4)
+            print(int_k)
 
-        n = len(self.bins)
-        plt.plot(np.arange(n), np.arange(n), color='black', linestyle='-', linewidth=1)
+        # --- Image ---
+        X, Y = np.meshgrid(self.bins, self.bins)
+        im = ax.pcolormesh(
+            X, Y, arr.T,
+            cmap='RdBu_r',
+            norm=norm_obj,
+            shading='auto'
+        )
 
-        plt.xticks(ticks=np.arange(len(self.bins)), labels=[f"{b:.2f}" for b in self.bins], rotation=90)
-        plt.yticks(ticks=np.arange(len(self.bins)), labels=[f"{b:.2f}" for b in self.bins])
-        plt.ylabel('Q Shell (giving)')
-        plt.xlabel('K Shell (receiving)')
-        plt.title(f'Shell-to-Shell Energy Transfer for {channel} at t = {self.time}')
-        plt.tight_layout()
-        plt.legend()
-        plt.show()
+        if add_colorbar:
+            fig.colorbar(im, ax=ax, label='Energy Transfer')
+
+        # Diagonal line
+        ax.plot(self.bins, self.bins,
+                color='black', linestyle='-', linewidth=1)
+
+        # Axis labels
+        if show_ylabel:
+            ax.set_ylabel('Q Shell (giving)')
+        if show_xlabel:
+            ax.set_xlabel('K Shell (receiving)')
+        if show_title:
+            ax.set_title(f'Shell-to-Shell Energy Transfer for {channel} at t = {self.time}')
+
+        # Axis scales
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+
+        # Hide x ticks if requested
+        if not show_xticks:
+            ax.set_xticks([])
+            ax.set_xticklabels([])
+
+        ax.legend(title=channel)
+        fig.tight_layout()
+
+        # Only show if we created the figure
+        if created_fig:
+            plt.show()
+
+        return im
+
+
     
     def get_tot_to_B(self, channel, K=None):
         # define array: 
