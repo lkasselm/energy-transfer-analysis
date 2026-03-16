@@ -127,8 +127,8 @@ class EnergyTransfer:
             for i in range(3):
                 self.W[i] = np.sqrt(rho) * U[i]
 
-        if self.S is None and P is not None:
-            self.S = np.sqrt(self.gamma*P)
+        #if self.S is None and P is not None:
+        #    self.S = np.sqrt(self.gamma*P)
 
         if self.FT_W is None:
             self.FT_W = newDistArray(self.FFT,rank=1)

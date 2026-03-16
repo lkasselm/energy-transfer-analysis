@@ -16,6 +16,32 @@ import matplotlib
 import pickle
 import energy_transfer_interface.io_utils as io_utils
 
+## Functions for standalone analysis (not tied to a "simulation" object): 
+def get_transfer_data(filename):
+    with open(filename, "rb") as f:
+        data = pickle.load(f)
+    
+    types = ['BB', 'UU', 'UBTb', "H"]
+    transfer_data = {}
+
+    for type_ in types:
+        # Extract transfer array and bins:
+        try:
+            transfer_dict = data['WW'][type_]['AnyToAny']
+        except KeyError:
+            raise KeyError(f"Transfer type {type_} not found in transfer analysis data.")
+        transfer_array, k_labels, _ = io_utils.dict_to_array(transfer_dict)
+        if type_ == 'UBTb':
+            type_ = 'UBT'  # rename for consistency
+        transfer_data[type_] = transfer_array            
+    k_edges = np.array([tuple(map(float, s.split('-'))) for s in k_labels])
+    k_geom = np.sqrt(k_edges[:, 0] * k_edges[:, 1])
+
+    time = None
+
+    energy_transfer = EnergyTransfer(transfer_data, k_geom, k_edges, parent_simulation=None, time=time)
+    return energy_transfer
+
 # Map simple keys to parthenon keys
 prim_key_dict = {
     'rho': 'prim_density', 
@@ -121,14 +147,38 @@ class Spectrum:
     @property
     def tot_val(self):
         # compute total integrated value of the spectrum
-        total = np.trapz(self.values, self.bins)
+        total = np.trapezoid(self.values, self.bins)
         return total
     
+    import numpy as np
+
     @property
     def int_scale(self):
-        # compute integral scale of the spectrum E(k), defined as L_int = ( ∫ E(k)/k dk ) / ( ∫ E(k) dk )
-        integral = np.trapz(self.values / self.bins, self.bins)
-        L_int = integral / self.tot_val
+        """
+        Compute integral scale of the spectrum E(k), defined as:
+        L_int = ( ∫ E(k)/k dk ) / ( ∫ E(k) dk )
+
+        Safely handles zero bins by ignoring them.
+        """
+        bins = np.array(self.bins, dtype=float)
+        values = np.array(self.values, dtype=float)
+
+        # Avoid zero bins for numerator
+        mask = bins != 0
+
+        if not np.any(mask) or np.sum(values) == 0:
+            return 0.0  # handle empty or zero-only spectrum
+
+        # Numerator: integrate E(k)/k over non-zero bins
+        numerator = np.trapezoid(values[mask] / bins[mask], bins[mask])
+
+        # Denominator: integrate E(k) over all bins
+        denominator = np.trapezoid(values, bins)
+
+        if denominator == 0:
+            return 0.0
+
+        L_int = numerator / denominator
         return L_int
     
 class EnergyTransfer:
@@ -355,6 +405,8 @@ class Simulation:
         # Find all spectral .spc files: 
         pattern = "*.[0-9][0-9][0-9][0-9][0-9].spc"
         self.spectral_files = sorted(glob.glob(os.path.join(directory, pattern)))
+        self.spectral_files_vel = [f for f in self.spectral_files if "spec_type_0" in f]
+        self.spectral_files_mag = [f for f in self.spectral_files if "spec_type_2" in f]
 
         # Find all transfer analysis .pkl files:
         pattern = "transfer_analysis_parthenon.prim.*.pkl"
@@ -439,20 +491,25 @@ class Simulation:
         data = io_utils.read_h5_to_dict(filename)
         return data
 
-    def get_spectrum_(self, time):
+    def get_spectrum_(self, time, field="B"):
         # retrieve flow analysis file that is closest to "time":
+        if field == "B":
+            files = self.spectral_files_mag
+        elif field == "v": 
+            files = self.spectral_files_vel
+
         if len(self.spectral_files) == 0:
             raise RuntimeError("No spectral files found in simulation directory.")
         step = round(time/self.dt)
-        if step < 0 or step >= len(self.spectral_files):
-            raise ValueError(f"Time {time} out of range (0 to {self.dt * len(self.spectral_files)})")
-        filename = min(self.spectral_files, key=lambda f: abs(io_utils.extract_index(f) - step))
+        if step < 0 or step >= len(files):
+            raise ValueError(f"Time {time} out of range (0 to {self.dt * len(files)})")
+        filename = min(files, key=lambda f: abs(io_utils.extract_index(f) - step))
         # get the exact time from the snapshot index:
         step_exact = io_utils.extract_index(filename)
         time = step_exact * self.dt
         
         dataframe = io_utils.parse_spc_file(filename)
-        return Spectrum("B", dataframe["Bin"], dataframe["En_sum"], parent=self, binscale='linear', time=time)
+        return Spectrum(field, dataframe["Bin"], dataframe["En_sum"], parent=self, binscale='linear', time=time)
 
     def get_spectrum(self, time, field='B'):
         # retrieve flow analysis file that is closest to "time":

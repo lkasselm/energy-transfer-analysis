@@ -41,6 +41,9 @@ def setup_fft(res, dtype=np.complex64):
 
     time_start = MPI.Wtime()
 
+    if comm.Get_rank() == 0:
+        print("Setting up FFT and wavenumbers...")
+
     N = np.array([res, res, res], dtype=int)
     # using L = 2pi as we work (e.g. when binning) with integer wavenumbers
     L = np.array([2*np.pi, 2*np.pi, 2*np.pi], dtype=float)

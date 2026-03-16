@@ -41,7 +41,7 @@ def read_fields(args):
                             rhoField, velFields, magFields,
                             accFields, pressField)
 
-    elif args['data_type'][:8] == 'AthenaPP':
+    elif args['data_type'] == 'AthenaPP':
         rhoField = ('athena_pp', 'rho')
         velFields = [('athena_pp', 'vel1'), ('athena_pp', 'vel2'), ('athena_pp', 'vel3')]
         if args['b']:
@@ -69,11 +69,39 @@ def read_fields(args):
                                 None, None, None,
                                 accFields, None)
             
-    elif args['data_type'][:8] == 'AthenaPK':
+    elif args['data_type'] == 'AthenaPK':
         rhoField = ('parthenon', 'prim_density')
         velFields = [('parthenon', 'prim_velocity_1'), ('parthenon', 'prim_velocity_2'), ('parthenon', 'prim_velocity_3')]
         if args['b']:
             magFields = [('parthenon', 'prim_magnetic_field_1'), ('parthenon', 'prim_magnetic_field_2'), ('parthenon', 'prim_magnetic_field_3')]
+        if args['forced']:
+            accFields = [('parthenon', 'acc_0'),
+                         ('parthenon', 'acc_1'),
+                         ('parthenon', 'acc_2')]
+
+        if args['eos'] == 'adiabatic':
+            pressField = ('parthenon', 'prim_pressure')
+
+        if 'HDF' in args['data_type']:
+            readAllFieldsWithHDF(fields,args['data_path'], args['res'],
+                                rhoField, velFields, magFields,
+                                None, pressField,'F',use_athena_hdf=True)
+            readAllFieldsWithHDF(fields,args['data_path'], args['res'],
+                                None, None, None,
+                                accFields, None,'F',use_athena_hdf=True)
+        else:
+            readAllFieldsWithYT(fields,args['data_path'], args['res'],
+                                rhoField, velFields, magFields,
+                                None, pressField)
+            readAllFieldsWithYT(fields,args['data_path'], args['res'],
+                                None, None, None,
+                                accFields, None)
+
+    elif args['data_type'] == 'AthenaPK_rst':
+        rhoField = "cons_density"
+        velFields = ["cons_momentum_density_1", "cons_momentum_density_2", "cons_momentum_density_3"]
+        if args['b']:
+            magFields = ["cons_magnetic_field_1", "cons_magnetic_field_2", "cons_magnetic_field_3"]
         if args['forced']:
             accFields = [('parthenon', 'acc_0'),
                          ('parthenon', 'acc_1'),

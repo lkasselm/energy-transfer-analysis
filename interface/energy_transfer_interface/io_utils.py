@@ -130,7 +130,6 @@ def parse_spc_file(file_path):
     
     # Convert columns to appropriate types
     df['Bin'] = df['Bin'].astype(int)
-    df['En_sum'] = df['En_sum'].astype(float)
     df['K_sum'] = df['K_sum'].astype(float)
     df['Count'] = df['Count'].astype(int)
     
