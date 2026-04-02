@@ -35,6 +35,9 @@ class EnergyTransfer:
         self.FT_rho = None
         self.FT_U = None
 
+        self.Bp = None # For helical mode decomposition
+        self.Bm = None 
+
         self.FFT = FFTHelperFuncs.FFT
         self.localKmag = np.linalg.norm(FFTHelperFuncs.local_wavenumbermesh,axis=0)
         self.localK = FFTHelperFuncs.local_wavenumbermesh 
@@ -121,6 +124,8 @@ class EnergyTransfer:
         P = self.P
         U = self.U
         B = self.B
+        Bp = self.Bp 
+        Bm = self.Bm 
 
         if self.W is None:
             self.W = newDistArray(self.FFT,False,rank=1)                                
@@ -133,7 +138,12 @@ class EnergyTransfer:
         if self.FT_W is None:
             self.FT_W = newDistArray(self.FFT,rank=1)
             for i in range(3):
-                self.FT_W[i] = self.FFT.forward(self.W[i], self.FT_W[i])            
+                self.FT_W[i] = self.FFT.forward(self.W[i], self.FT_W[i]) 
+
+        if self.FT_U is None:
+            self.FT_U = newDistArray(self.FFT,rank=1)
+            for i in range(3):
+                self.FT_U[i] = self.FFT.forward(self.U[i], self.FT_U[i])            
             
         if self.FT_B is None and self.B is not None:
             self.FT_B = newDistArray(self.FFT,rank=1)
@@ -142,6 +152,15 @@ class EnergyTransfer:
 
             # also compute helical decomposition of B field in Fourier space (if needed)
             self.FT_B_plus, self.FT_B_minus = getHelicalDecomposition(self.FT_B, self.localK[0], self.localK[1], self.localK[2])
+
+            # Get helical decomposition in real space: 
+            self.Bp = newDistArray(self.FFT, False, rank=1)
+            for i in range(3):
+                self.Bp[i] = self.FFT.backward(self.FT_B_plus[i], self.Bp[i]) 
+
+            self.Bm = newDistArray(self.FFT, False, rank=1)
+            for i in range(3):
+                self.Bm[i] = self.FFT.backward(self.FT_B_minus[i], self.Bm[i]) 
         
         if self.FT_P is None and self.P is not None:
             self.FT_P = newDistArray(self.FFT)
@@ -189,8 +208,11 @@ class EnergyTransfer:
 
         # clear Q terms
         W_Q = None
+        U_Q = None 
         S_Q = None
         B_Q = None
+        B_Q_plus = None
+        B_Q_minus = None 
         SDivW_QoverGammaSqrtRho = None
         OneOverGammaSqrtRhogradSS_Q = None
         OneOverTwoSqrtRhogradBB_Q = None
@@ -198,6 +220,12 @@ class EnergyTransfer:
         UdotGradS_Q = None
         UdotGradB_Q = None
         bDotGradB_Q = None
+
+        UdotGradB_Qp = None
+        UdotGradB_Qm = None
+        BpdotGradU_Q = None
+        BmdotGradU_Q = None
+
         BdotGradW_QoverSqrtRho = None
         DivbW_Q = None
         bdotGradW_Q = None
@@ -222,6 +250,8 @@ class EnergyTransfer:
             W_K = None
             S_K = None	
             B_K = None
+            B_K_plus = None
+            B_K_minus = None 
             
             for k in range(len(KBins)-1):
                 
@@ -653,6 +683,9 @@ class EnergyTransfer:
                     if B_Q is None:
                         B_Q = self.getShellX(FT_B,QBins[q],QBins[q+1])
 
+                    if DivW_Qb is None:
+                        DivW_Qb = MPIdivXY(self.comm,W_Q,b)
+
                     localSum = 2. * np.sum(B_K * np.cross(U, B_Q, axis=0))
                     totalSum = None
                     totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
@@ -677,6 +710,55 @@ class EnergyTransfer:
                             if self.comm.Get_rank() == 0:
                                 self.addResultToDict(Result,"WW","H%s%s" % (signK,signQ),"AnyToAny",KBin,QBin,totalSum, has_gradient=False)
                                 print("done with H%s%s for K = %s Q = %s after %.1f sec [total]" % (signK,signQ,KBin,QBin,time.time() - startTime ))
+
+                # Helicity-decomposed energy transfer
+                if "TH" in Terms:
+
+                    if B_K_plus is None:
+                        B_K_plus = self.getShellX(self.FT_B_plus,KBins[k],KBins[k+1])
+                    if B_K_minus is None:
+                        B_K_minus = self.getShellX(self.FT_B_minus,KBins[k],KBins[k+1])
+                    if B_Q_plus is None:
+                        B_Q_plus = self.getShellX(self.FT_B_plus,QBins[q],QBins[q+1])
+                    if B_Q_minus is None:
+                        B_Q_minus = self.getShellX(self.FT_B_minus,QBins[q],QBins[q+1])
+
+                    """
+                    # BB
+                    if UdotGradB_Qp is None: 
+                        UdotGradB_Qp = MPIXdotGradY(self.comm,U,B_Q_plus) 
+                    if UdotGradB_Qm is None: 
+                        UdotGradB_Qm = MPIXdotGradY(self.comm,U,B_Q_minus) 
+                    
+                    for signK, B_K_helical in zip(["+", "-"], [B_K_plus, B_K_minus]):
+                        for signQ, UdotGradB_Q_h in zip(["+", "-"], [UdotGradB_Qp, UdotGradB_Qm]): 
+                            
+                            localSum = - np.sum(B_K_helical * UdotGradB_Q_h) 
+                            totaljSum = None
+                            totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+
+                            if self.comm.Get_rank() == 0:
+                                self.addResultToDict(Result,"WW","BB%s%s" % (signK,signQ),"AnyToAny",KBin,QBin,totalSum, has_gradient=True)
+                                print("done with BB%s%s for K = %s Q = %s after %.1f sec [total]" % (signK,signQ,KBin,QBin,time.time() - startTime ))
+                    """
+                    # UBT
+                    if U_Q is None:
+                        U_Q = self.getShellX(self.FT_U,QBins[q],QBins[q+1])
+                    if BpdotGradU_Q is None:
+                        BpdotGradU_Q = MPIXdotGradY(self.comm, self.Bp, U_Q)
+                    if BmdotGradU_Q is None:
+                        BmdotGradU_Q = MPIXdotGradY(self.comm, self.Bm, U_Q)
+
+                    for signK, B_K_helical in zip(["+", "-"], [B_K_plus, B_K_minus]):
+                        for signQ, BhdotGradU_Q in zip(["+", "-"], [BpdotGradU_Q, BmdotGradU_Q]):
+
+                            localSum = np.sum(B_K_helical * BhdotGradU_Q)
+                            totalSum = None
+                            totalSum = self.comm.reduce(sendobj=localSum, op=self.MPI.SUM, root=0)
+                        
+                            if self.comm.Get_rank() == 0:
+                                self.addResultToDict(Result,"WW","UBT%s%s" % (signK,signQ),"AnyToAny",KBin,QBin,totalSum, has_gradient=True)
+                                print("done with UBT%s%s for K = %s Q = %s after %.1f sec [total]" % (signK,signQ,KBin,QBin,time.time() - startTime ))
 
                 if "T" in Terms:
                     # Total triadic coupeling leading to energy increase in specific I shell (here I = 10), I.e. T_{Ikq}
@@ -753,20 +835,35 @@ class EnergyTransfer:
 
                 # clear K terms
                 W_K = None
-                S_K = None
+                S_K = None	
                 B_K = None
+                B_K_plus = None
+                B_K_minus = None 
         
 
             # clear Q terms
             W_Q = None
             S_Q = None
             B_Q = None
+            B_Q_plus = None 
+            B_Q_minus = None
             OneOverTwoSqrtRhogradBB_Q = None
             SDivW_QoverGammaSqrtRho  = None
             OneOverGammaSqrtRhogradSS_Q = None
             UdotGradW_Q = None
             UdotGradS_Q = None
             UdotGradB_Q = None
+            UdotGradB_Qp = None 
+            UdotGradB_Qm = None
+
+            U_Q = None 
+
+            UdotGradB_Qp = None
+            UdotGradB_Qm = None
+
+            BpdotGradU_Q = None
+            BmdotGradU_Q = None
+
             bDotGradB_Q = None
             BdotGradW_QoverSqrtRho = None
             DivbW_Q = None

@@ -96,7 +96,7 @@ parser.add_argument('--terms',
                     nargs='+',
                     default=None,
                     choices = ['All', 'Int', 'UU', 'BUT', 'BUP', 'UBT', 'UBPb',
-                               'BB', 'BUPbb', 'UBPbb', 'SS', 'SU', 'US', 'PU', 'FU', 'H', 'T'],
+                               'BB', 'BUPbb', 'UBPbb', 'SS', 'SU', 'US', 'PU', 'FU', 'H', 'T', "TH"],
                     help='set energy transfer terms to analyze')
 
 parser.add_argument('--binning',
@@ -182,6 +182,8 @@ if args['type'] == 'transfer':
         resolution_exp = np.log(resolution/8)/np.log(2) * 4 + 1
         bins = np.concatenate(
             (np.array([0.]), 4.* 2** ((np.arange(0,resolution_exp + 1) - 1.) /4.)))
+        
+        print(bins)
     
     elif args['binning'] == "test":
         bins = [0.5,1.5,2.5,16.0,26.5,28.5,32.0]

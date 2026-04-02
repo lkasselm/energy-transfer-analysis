@@ -1,13 +1,13 @@
 import numpy as np 
 
 def getHelicalDecomposition(FTquant, kx, ky, kz):
-        """ perform helicity decomposition of vector field FTquant
+        """ perform helicity decomposition of solenoidal vector field in Fourier space FTquant
             returns positive and negative helicity components B_plus, B_minus,
             such that FTquant = B_plus + B_minus.  
         """
 
         if FTquant.shape[0] != 3:
-            raise SystemExit("Helicity decomposition only implemented for vector fields")
+            raise SystemExit("Helicity decomposition only implemented for 3D vector fields")
     
         # construct helical basis:
         

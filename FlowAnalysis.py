@@ -46,9 +46,9 @@ class FlowAnalysis:
         self.has_b_fields = args['b']
         self.kernels= args['kernels']
 
-        if self.rank == 0:
-            self.outfile_path = args['outfile']
-            self.helicity_outfile_path = self.outfile_path + '_helicity.h5'
+        #if self.rank == 0:
+        self.outfile_path = args['outfile']
+        self.helicity_outfile_path = self.outfile_path + '_helicity.h5'
 
         # maximum integer wavenumber
         k_max_int = ceil(self.res*0.5*np.sqrt(3.))
@@ -548,17 +548,17 @@ class FlowAnalysis:
         # self.vector_power_spectrum_from_fft('B_minus', Bminus_hat)
 
         # Calculate Vector potential in fourier space:
-        #cross = np.cross(k, B_hat, axis=0) 
-        #k2 = np.sum(k**2, axis=0) 
-        #k2[k2 == 0] = 1.0  # avoid division by zero for DC mode
-        #A_hat = 1j * cross / k2
+        cross = np.cross(k, B_hat, axis=0) 
+        k2 = np.sum(k**2, axis=0) 
+        k2[k2 == 0] = 1.0  # avoid division by zero for DC mode
+        A_hat = 1j * cross / k2
 
         # Get helicity spectrum:
-        #helicity_hat = newDistArray(self.FFT, rank=0) # when reducing rank = 1 arrays, the resulting array needs to be specified as rank = 0
-        #helicity_hat[:] = np.real(np.sum(A_hat * np.conj(B_hat), axis=0)) # this gets passed real values, but newDistArray type is complex. self.normalized spectrum will raise a warning. Fix me.
+        helicity_hat = newDistArray(self.FFT, rank=0) # when reducing rank = 1 arrays, the resulting array needs to be specified as rank = 0
+        helicity_hat[:] = np.real(np.sum(A_hat * np.conj(B_hat), axis=0)) # this gets passed real values, but newDistArray type is complex. self.normalized spectrum will raise a warning. Fix me.
 
-        #PS_Full = self.normalized_spectrum(self.localKmag.reshape(-1),helicity_hat.reshape(-1))
-        """
+        PS_Full = self.normalized_spectrum(self.localKmag.reshape(-1),helicity_hat.reshape(-1))
+        
         # Write helicity spectrum to file
         name = 'helicity'
         if self.rank == 0:
@@ -579,8 +579,9 @@ class FlowAnalysis:
             self.outfile.require_dataset(name + '/TotFull', (1,), dtype='f')[0] = tot_helicity
 
         # delete unused variables
-        del k, k2, helicity_hat, cross    
+        del k, k2, cross    
 
+        """
         # Transform vector potential to real space: 
         A = newDistArray(self.FFT, False, rank=1)
         for i in range(3):
@@ -594,24 +595,25 @@ class FlowAnalysis:
 
         helicity = newDistArray(self.FFT, False, rank=0)
         helicity[:] = np.sum(A*B, axis=0)
-
         # write z = 0 slice of helicity field to file
-        #if self.rank == 0:
-        #    print('Writing helicity field to file')
-        #    helicity.write(self.helicity_outfile_path, 'helicity', 0, global_slice=[slice(None), slice(None), 0])
+        if self.rank == 0:
+            print('Writing helicity field to file')
+        helicity.write(self.helicity_outfile_path, 'helicity', 0, global_slice=[slice(None), slice(None), 0])
+        if self.rank == 0:
+            print("Writing to file done")
 
         # calculate power spectrum for helicity variance:
-        self.scalar_power_spectrum('helicity_variance', helicity)
+        #self.scalar_power_spectrum('helicity_variance', helicity)
 
         # calculate cross-helicity spectrum:
-        U_hat = self.compute_fft(self.U)
-        cross_helicity_hat = newDistArray(self.FFT, rank=0) # when reducing rank = 1 arrays, the resulting array needs to be specified as rank = 0
-        cross_helicity_hat[:] = np.real(np.sum(U_hat * np.conj(B_hat), axis=0)) # this gets passed real values, but newDistArray type is complex. self.normalized spectrum will raise a warning. Fix me.
-        PS_Full = self.normalized_spectrum(self.localKmag.reshape(-1),cross_helicity_hat.reshape(-1))
-        name = 'cross_helicity'
-        if self.rank == 0:
-            self.outfile.require_dataset(name + '/PowSpec/Bins', (1,len(self.k_bins)), dtype='f')[0] = self.k_bins
-            self.outfile.require_dataset(name + '/PowSpec/Full', (4,len(self.k_bins)-1), dtype='f')[:,:] = PS_Full
+        #U_hat = self.compute_fft(self.U)
+        #cross_helicity_hat = newDistArray(self.FFT, rank=0) # when reducing rank = 1 arrays, the resulting array needs to be specified as rank = 0
+        #cross_helicity_hat[:] = np.real(np.sum(U_hat * np.conj(B_hat), axis=0)) # this gets passed real values, but newDistArray type is complex. self.normalized spectrum will raise a warning. Fix me.
+        #PS_Full = self.normalized_spectrum(self.localKmag.reshape(-1),cross_helicity_hat.reshape(-1))
+        #name = 'cross_helicity'
+        #if self.rank == 0:
+        #    self.outfile.require_dataset(name + '/PowSpec/Bins', (1,len(self.k_bins)), dtype='f')[0] = self.k_bins
+        #    self.outfile.require_dataset(name + '/PowSpec/Full', (4,len(self.k_bins)-1), dtype='f')[:,:] = PS_Full
         """
 
     def get_and_write_statistics_to_file(self,field,name,bounds=None):
